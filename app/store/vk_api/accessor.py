@@ -7,7 +7,8 @@ from aiohttp import TCPConnector
 from aiohttp.client import ClientSession
 
 from app.base.base_accessor import BaseAccessor
-from app.store.vk_api.dataclasses import Update, Message, UpdateObject
+from app.quiz.models import User
+from app.store.vk_api.dataclasses import Update, Message, UpdateObject, UpdateStatus
 from app.store.vk_api.poller import Poller
 
 if typing.TYPE_CHECKING:
@@ -16,38 +17,39 @@ if typing.TYPE_CHECKING:
 API_PATH = "https://api.vk.com/method/"
 
 
-keyboard = {
-   "one_time": False,
-   "inline": True,
-   "buttons": [
-      [
-         {  
-            "action":{  
-               "type":"text",
-               "payload": {"button": "start_game"},
-               "label": "Начать игру"
-            },
-            "color":"positive"
-         },
-          {
-              "action": {
-                  "type": "text",
-                  "payload": {"button": "finish_game"},
-                  "label": "Завершить игру"
-              },
-              "color": "negative"
-          },
-         {  
-            "action":{  
-               "type":"text",
-               "payload": {"button": "result"},
-               "label": "Текущие результаты"
-            },
-            "color":"primary"
-         },
-      ]
-   ]
-}
+class Keyboard:
+    navigate = {
+        # "one_time": False,
+        "inline": True,
+        "buttons": [
+            [
+                {
+                    "action": {
+                        "type": "text",
+                        "payload": {"button": UpdateStatus.START_GAME},
+                        "label": "Начать игру"
+                    },
+                    "color": "positive"
+                },
+                {
+                    "action": {
+                        "type": "text",
+                        "payload": {"button": UpdateStatus.FINISH_GAME},
+                        "label": "Завершить игру"
+                    },
+                    "color": "negative"
+                },
+                {
+                    "action": {
+                        "type": "text",
+                        "payload": {"button": UpdateStatus.RESULT_GAME},
+                        "label": "Текущие результаты"
+                    },
+                    "color": "primary"
+                },
+            ]
+        ]
+    }
 
 
 class VkApiAccessor(BaseAccessor):
@@ -85,14 +87,14 @@ class VkApiAccessor(BaseAccessor):
 
     async def _get_long_poll_service(self):
         async with self.session.get(
-            self._build_query(
-                host=API_PATH,
-                method="groups.getLongPollServer",
-                params={
-                    "group_id": self.app.config.bot.group_id,
-                    "access_token": self.app.config.bot.token,
-                },
-            )
+                self._build_query(
+                    host=API_PATH,
+                    method="groups.getLongPollServer",
+                    params={
+                        "group_id": self.app.config.bot.group_id,
+                        "access_token": self.app.config.bot.token,
+                    },
+                )
         ) as resp:
             data = (await resp.json())["response"]
             self.logger.info(data)
@@ -101,18 +103,43 @@ class VkApiAccessor(BaseAccessor):
             self.ts = data["ts"]
             self.logger.info(self.server)
 
+    async def get_users_from_chat(self, peer_id):
+        """ Получаем список юзеров из чата по peer_id """
+        users = []
+        async with self.session.get(
+                self._build_query(
+                    host=API_PATH,
+                    method="messages.getConversationMembers",
+                    params={
+                        "peer_id": peer_id,
+                        "access_token": self.app.config.bot.token,
+                    },
+                )
+        ) as resp:
+            data = (await resp.json())["response"]
+            profiles = data.get("profiles", [])
+            for profile in profiles:
+                users.append(
+                    User(id=len(users) + 1,
+                         vk_id=str(profile['id']),
+                         name=f'{profile["first_name"]} {profile["last_name"]}',
+                         is_admin=False,
+                    )
+                )
+        return users
+
     async def poll(self):
         async with self.session.get(
-            self._build_query(
-                host=self.server,
-                method="",
-                params={
-                    "act": "a_check",
-                    "key": self.key,
-                    "ts": self.ts,
-                    "wait": 30,
-                },
-            )
+                self._build_query(
+                    host=self.server,
+                    method="",
+                    params={
+                        "act": "a_check",
+                        "key": self.key,
+                        "ts": self.ts,
+                        "wait": 30,
+                    },
+                )
         ) as resp:
             data = await resp.json()
             self.logger.info(data)
@@ -121,12 +148,20 @@ class VkApiAccessor(BaseAccessor):
             updates = []
             for update in raw_updates:
                 type_chat = 'public' if update["object"]["message"]["peer_id"] > 2000000000 else 'privat'
+                action = update.get("object", {}).get("message", {}).get("action", {}).get("type")
+                if action is None:
+                    payload = update.get("object", {}).get("message", {}).get("payload")
+                    action = json.loads(payload).get('button') if payload is not None else None
+                # action = UpdateStatus.INVITE_CHAT
+                # print('action', action)
                 updates.append(
                     Update(
                         type=update["type"],
+                        action=action,
                         object=UpdateObject(
                             id=update["object"]["message"]["id"],
-                            user_id=update["object"]["message"]["peer_id"],
+                            user_id=update["object"]["message"]["from_id"],
+                            peer_id=update["object"]["message"]["peer_id"],
                             body=update["object"]["message"]["text"],
                             type_chat=type_chat,
                         ),
@@ -134,22 +169,26 @@ class VkApiAccessor(BaseAccessor):
                 )
             await self.app.store.bots_manager.handle_updates(updates)
 
-    async def send_message(self, message: Message) -> None:
+    async def send_message(self, message: Message, keyboard: str = None) -> None:
+        params = {
+                        # "user_id": message.user_id,
+                        "random_id": random.randint(1, 2 ** 32),
+                        # "peer_id": "-" + str(self.app.config.bot.group_id),
+                        "peer_id": message.peer_id,
+                        "message": message.text,
+                        "access_token": self.app.config.bot.token,
+                        # "one_time": 'false',
+                        # "keyboard": json.dumps(keyboard),
+                    }
+        if keyboard:
+            params["keyboard"] = json.dumps(keyboard)
+
         async with self.session.get(
-            self._build_query(
-                API_PATH,
-                "messages.send",
-                params={
-                    # "user_id": message.user_id,
-                    "random_id": random.randint(1, 2 ** 32),
-                    # "peer_id": "-" + str(self.app.config.bot.group_id),
-                    "peer_id": message.user_id,
-                    "message": message.text,
-                    "access_token": self.app.config.bot.token,
-                    # "one_time": 'false',
-                    "keyboard": json.dumps(keyboard),
-                },
-            )
+                self._build_query(
+                    API_PATH,
+                    "messages.send",
+                    params=params,
+                )
         ) as resp:
             data = await resp.json()
             self.logger.info(data)

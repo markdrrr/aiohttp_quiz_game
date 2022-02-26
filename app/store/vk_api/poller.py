@@ -22,5 +22,4 @@ class Poller:
     async def poll(self):
         while self.is_running:
             updates = await self.store.vk_api.poll()
-            print('1111')
             await self.store.bots_manager.handle_updates(updates)
