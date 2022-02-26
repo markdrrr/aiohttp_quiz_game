@@ -66,22 +66,26 @@ class Answer:
 class Game:
     id: int
     chat_id: str
+    status: int
     user_ids: list
     question_ids: list
+    current_question_id: int
 
 
 class StatusGame(enum.Enum):
-    start = 1
-    progress = 2
-    finish = 3
+    NO_STARTED = 1
+    STARTED = 2
+    FINISHED = 3
+
 
 class GameModel(db.Model):
     __tablename__ = "game"
 
     id = db.Column(db.Integer(), primary_key=True)
-    chat_id = db.Column(db.String(120), unique=True)
+    chat_id = db.Column(db.String(120))
     question_ids = db.Column(db.ARRAY(db.Integer))
     status = db.Column(ChoiceType(StatusGame, impl=db.Integer()))
+    current_question_id = db.Column(db.Integer, db.ForeignKey('questions.id', ondelete='SET NULL'), nullable=True)
 
     def __init__(self, **kw):
         super().__init__(**kw)
@@ -95,7 +99,7 @@ class GameModel(db.Model):
     @users.setter
     def add_user(self, user):
         self._users.add(user)
-        user._parents.add(self)
+        user._games.add(self)
 
     @property
     def scores(self):
@@ -105,6 +109,13 @@ class GameModel(db.Model):
     def add_score(self, score):
         self._games.add(score)
 
+
+@dataclass
+class UserAnswer:
+    user_id: str
+    chat_id: str
+    answer: str
+    is_correct: bool
 
 @dataclass
 class User:
@@ -119,7 +130,7 @@ class UserModel(db.Model):
 
     id = db.Column(db.Integer(), primary_key=True)
     vk_id = db.Column(db.String(120), unique=True)
-    name = db.Column(db.String(120), unique=True)
+    name = db.Column(db.String(120))
     is_admin = db.Column(db.Boolean())
 
     def __init__(self, **kw):
@@ -134,7 +145,7 @@ class UserModel(db.Model):
     @games.setter
     def add_game(self, game):
         self._games.add(game)
-        game._parents.add(self)
+        game._users.add(self)
 
     @property
     def scores(self):
@@ -142,7 +153,14 @@ class UserModel(db.Model):
 
     @scores.setter
     def add_score(self, score):
-        self._games.add(score)
+        self._scores.add(score)
+
+
+@dataclass
+class UserScore:
+    user_id: int
+    score_count: int
+    name: str
 
 
 @dataclass
