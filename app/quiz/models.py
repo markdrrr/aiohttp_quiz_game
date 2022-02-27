@@ -129,9 +129,10 @@ class UserModel(db.Model):
     __tablename__ = "user"
 
     id = db.Column(db.Integer(), primary_key=True)
-    vk_id = db.Column(db.String(120), unique=True)
-    name = db.Column(db.String(120))
-    is_admin = db.Column(db.Boolean())
+    vk_id = db.Column(db.String(120), unique=True, nullable=False)
+    name = db.Column(db.String(120), nullable=False)
+    is_admin = db.Column(db.Boolean(), nullable=False)
+    dt_created = db.Column(db.DateTime, server_default='now()')
 
     def __init__(self, **kw):
         super().__init__(**kw)
@@ -175,13 +176,10 @@ class ScoreModel(db.Model):
     __tablename__ = "score"
 
     id = db.Column(db.Integer(), primary_key=True)
-    count = db.Column(db.Integer())
-    user_id = db.Column(db.Integer, db.ForeignKey('user.id', ondelete='CASCADE'), nullable=False)
+    count = db.Column(db.Integer(), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id', ondelete='SET NULL'), nullable=False)
     game_id = db.Column(db.Integer, db.ForeignKey('game.id', ondelete='CASCADE'), nullable=False)
 
-
-class GameUserModel(db.Model):
-    __tablename__ = 'games_x_users'
-
-    game_id = db.Column(db.Integer, db.ForeignKey('game.id'))
-    user_id = db.Column(db.Integer, db.ForeignKey('user.id'))
+    __table_args__ = (
+        db.UniqueConstraint('user_id', 'game_id'),
+    )
