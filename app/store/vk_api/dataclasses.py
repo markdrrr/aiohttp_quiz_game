@@ -16,6 +16,9 @@ class UpdateStatus:
     FINISH_GAME = 'finish_game'
     RESULT_GAME = 'result_game'
 
+    KEYBOARD_ACTION = [START_GAME, FINISH_GAME, RESULT_GAME]
+
+
 @dataclass
 class Update:
     type: str
@@ -27,17 +30,3 @@ class Update:
 class Message:
     peer_id: int
     text: str
-
-# @dataclass
-# class Winner:
-#     vk_id: int
-#     points: int
-#
-# @dataclass
-# class Game:
-#     id: int
-#     chat_id: int
-#     started_at: str
-#     finished_at: str
-#     winner: Winner
-

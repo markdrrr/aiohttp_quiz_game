@@ -1,7 +1,7 @@
 import json
 import random
 import typing
-from typing import Optional
+from typing import Optional, List
 
 from aiohttp import TCPConnector
 from aiohttp.client import ClientSession
@@ -43,7 +43,7 @@ class Keyboard:
                     "action": {
                         "type": "text",
                         "payload": {"button": UpdateStatus.RESULT_GAME},
-                        "label": "Текущие результаты"
+                        "label": "Результаты"
                     },
                     "color": "primary"
                 },
@@ -103,9 +103,7 @@ class VkApiAccessor(BaseAccessor):
             self.ts = data["ts"]
             self.logger.info(self.server)
 
-    async def get_users_from_chat(self, peer_id):
-        """ Получаем список юзеров из чата по peer_id """
-        users = []
+    async def _get_users_chat(self, peer_id: int):
         async with self.session.get(
                 self._build_query(
                     host=API_PATH,
@@ -117,15 +115,23 @@ class VkApiAccessor(BaseAccessor):
                 )
         ) as resp:
             data = (await resp.json())["response"]
-            profiles = data.get("profiles", [])
-            for profile in profiles:
-                users.append(
-                    User(id=len(users) + 1,
-                         vk_id=str(profile['id']),
-                         name=f'{profile["first_name"]} {profile["last_name"]}',
-                         is_admin=False,
-                    )
-                )
+            return data.get("profiles", [])
+
+    async def get_users_from_chat(self, peer_id: int) -> List[User]:
+        """ Получаем список юзеров из чата по peer_id """
+        users = []
+        try:
+            profiles = await self._get_users_chat(peer_id=peer_id)
+        except Exception as e:
+            profiles = []
+            self.logger.error("Exception", exc_info=e)
+        for profile in profiles:
+            user = await self.app.store.users.create_user(
+                vk_id=str(profile['id']),
+                name=f'{profile["first_name"]} {profile["last_name"]}',
+                is_admin=False,
+            )
+            users.append(user)
         return users
 
     async def poll(self):
@@ -152,8 +158,7 @@ class VkApiAccessor(BaseAccessor):
                 if action is None:
                     payload = update.get("object", {}).get("message", {}).get("payload")
                     action = json.loads(payload).get('button') if payload is not None else None
-                # action = UpdateStatus.INVITE_CHAT
-                # print('action', action)
+
                 updates.append(
                     Update(
                         type=update["type"],
@@ -171,15 +176,15 @@ class VkApiAccessor(BaseAccessor):
 
     async def send_message(self, message: Message, keyboard: str = None) -> None:
         params = {
-                        # "user_id": message.user_id,
-                        "random_id": random.randint(1, 2 ** 32),
-                        # "peer_id": "-" + str(self.app.config.bot.group_id),
-                        "peer_id": message.peer_id,
-                        "message": message.text,
-                        "access_token": self.app.config.bot.token,
-                        # "one_time": 'false',
-                        # "keyboard": json.dumps(keyboard),
-                    }
+            # "user_id": message.user_id,
+            "random_id": random.randint(1, 2 ** 32),
+            # "peer_id": "-" + str(self.app.config.bot.group_id),
+            "peer_id": message.peer_id,
+            "message": message.text,
+            "access_token": self.app.config.bot.token,
+            # "one_time": 'false',
+            # "keyboard": json.dumps(keyboard),
+        }
         if keyboard:
             params["keyboard"] = json.dumps(keyboard)
 
