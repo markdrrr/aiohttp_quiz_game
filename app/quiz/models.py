@@ -76,18 +76,15 @@ class Game:
     questions: list[Question]
     finish_question_ids: list
 
-    async def get_user(self, vk_id: str) -> "User":
-        print('self.users', self.users)
+    def get_user(self, vk_id: str) -> "User":
         user = list(filter(lambda x: x.vk_id == vk_id, self.users))
         return user[0] if len(user) > 0 else None
 
-    async def get_current_question(self) -> Question:
-        print('self.questions', self.questions)
+    def get_current_question(self) -> Question:
         question = list(filter(lambda x: x.id == self.current_question_id, self.questions))
-        print('question', question)
         return question[0] if len(question) > 0 else None
 
-    async def get_question_for_chat(self) -> Question:
+    def get_question_for_chat(self) -> Question:
         question = list(filter(lambda x: x.id not in self.finish_question_ids, self.questions))
         return question[0] if len(question) > 0 else None
 

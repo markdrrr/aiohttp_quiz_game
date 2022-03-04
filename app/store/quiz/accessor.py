@@ -129,8 +129,7 @@ class GameAccessor(BaseAccessor):
     async def create_game(self, chat_id: str, users: list) -> Game:
         """ Создаем игру """
         res_game = await GameModel.create(chat_id=chat_id, status=StatusGame.STARTED)
-        for user in users:
-            await ScoreModel.create(game_id=res_game.id, user_id=user.id, count=0)
+        await ScoreModel.insert().gino.all([dict(game_id=res_game.id, user_id=user.id, count=0) for user in users])
         return Game(
             id=res_game.id,
             chat_id=res_game.chat_id,
