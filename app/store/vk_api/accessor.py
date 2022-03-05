@@ -127,9 +127,9 @@ class VkApiAccessor(BaseAccessor):
             self.logger.error("Exception", exc_info=e)
         for profile in profiles:
             user = await self.app.store.users.create_user(
-                vk_id=str(profile['id']),
-                name=f'{profile["first_name"]} {profile["last_name"]}',
-                is_admin=False,
+                vk_id=profile['id'],
+                first_name=profile["first_name"],
+                last_name=profile["last_name"],
             )
             users.append(user)
         return users

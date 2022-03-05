@@ -1,3 +1,4 @@
+import datetime
 import enum
 from dataclasses import dataclass
 from typing import Optional
@@ -25,7 +26,7 @@ class Question:
     theme_id: int
     answers: list["Answer"]
 
-    async def get_correct_answer(self) -> "Answer":
+    def get_correct_answer(self) -> "Answer":
         answer = list(filter(lambda x: x.is_correct, self.answers))
         return answer[0] if len(answer) > 0 else None
 
@@ -69,14 +70,20 @@ class Answer:
 @dataclass
 class Game:
     id: int
-    chat_id: str
+    chat_id: int
     status: int
     current_question_id: int
     users: list["User"]
     questions: list[Question]
     finish_question_ids: list
+    started_at: datetime.datetime
+    finished_at: datetime.datetime
 
-    def get_user(self, vk_id: str) -> "User":
+    def get_winner(self) -> "User":
+        users = sorted(self.users, key=lambda x: x.points, reverse=True)
+        return users[0] if len(users) > 0 else None
+
+    def get_user(self, vk_id: int) -> "User":
         user = list(filter(lambda x: x.vk_id == vk_id, self.users))
         return user[0] if len(user) > 0 else None
 
@@ -99,10 +106,13 @@ class GameModel(db.Model):
     __tablename__ = "game"
 
     id = db.Column(db.Integer(), primary_key=True)
-    chat_id = db.Column(db.String(120))
+    chat_id = db.Column(db.Integer(), nullable=False)
     question_ids = db.Column(db.ARRAY(db.Integer))
     status = db.Column(ChoiceType(StatusGame, impl=db.Integer()))
     current_question_id = db.Column(db.Integer, db.ForeignKey('questions.id', ondelete='SET NULL'), nullable=True)
+    started_at = db.Column(db.DateTime, server_default='now()')
+    finished_at = db.Column(db.DateTime, nullable=True)
+    winner_user_id = db.Column(db.Integer, db.ForeignKey('user.id', ondelete='SET NULL'), nullable=True)
 
     def __init__(self, **kw):
         super().__init__(**kw)
@@ -115,7 +125,6 @@ class GameModel(db.Model):
 
     @users.setter
     def add_user(self, user):
-        print('add_user', user)
         self._users.add(user)
         user._games.add(self)
 
@@ -131,19 +140,19 @@ class GameModel(db.Model):
 @dataclass
 class User:
     id: int
-    vk_id: str
-    name: str
-    is_admin: bool
-    count_score: int
+    vk_id: int
+    first_name: str
+    last_name: str
+    points: int
 
 
 class UserModel(db.Model):
     __tablename__ = "user"
 
     id = db.Column(db.Integer(), primary_key=True)
-    vk_id = db.Column(db.String(120), unique=True, nullable=False)
-    name = db.Column(db.String(120), nullable=False)
-    is_admin = db.Column(db.Boolean(), nullable=False)
+    vk_id = db.Column(db.Integer(), unique=True, nullable=False)
+    first_name = db.Column(db.String(120), nullable=True)
+    last_name = db.Column(db.String(120), nullable=True)
     dt_created = db.Column(db.DateTime, server_default='now()')
 
     def __init__(self, **kw):
@@ -170,10 +179,26 @@ class UserModel(db.Model):
 
 
 @dataclass
+class Winner:
+    vk_id: int
+    win_count: int
+    first_name: str
+    last_name: str
+
+    def to_dict(self):
+        return {
+            'vk_id': self.vk_id,
+            'win_count': self.win_count,
+            'first_name': self.first_name,
+            'last_name': self.last_name,
+        }
+
+@dataclass
 class UserScore:
     user_id: int
-    score_count: int
-    name: str
+    points: int
+    first_name: str
+    last_name: str
 
 
 @dataclass
