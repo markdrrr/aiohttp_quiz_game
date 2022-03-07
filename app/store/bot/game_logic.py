@@ -81,8 +81,6 @@ class GameLogic:
         users = await self.app.store.vk_api.get_users_from_chat(peer_id=update.object.peer_id)
         game = await self.app.store.game.create_game(chat_id=chat_id, users=users)
         current_question = game.get_question_for_chat()
-        # запускаем в фоне проверку если выйдет время на ответ
-        asyncio.create_task(self.check_time_question(question_id=current_question.id, chat_id=chat_id))
         await self.app.store.game.set_current_question_for_game(question_id=current_question.id,
                                                                 game_id=game.id)
         await self.app.store.vk_api.send_message(
@@ -92,6 +90,8 @@ class GameLogic:
             ),
             keyboard=Keyboard.navigate
         )
+        # запускаем в фоне проверку если выйдет время на ответ
+        asyncio.create_task(self.check_time_question(question_id=current_question.id, chat_id=chat_id))
         return True
 
     async def action_result_game(self, update: Update, game: Game) -> bool:
