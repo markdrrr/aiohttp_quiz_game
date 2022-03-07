@@ -1,0 +1,33 @@
+version: '3'
+services:
+  web_aiohttp:
+    build:
+      context: ../
+      dockerfile: ./docker/Dockerfile
+    command: bash -c "alembic upgrade head && python3 main.py"
+    environment:
+      CONFIGPATH: "/usr/src/app/config.yml"
+    volumes:
+      - ../:/usr/src/app/
+    ports:
+      - "8080:8080"
+    restart: on-failure
+    image: web_aiohttp
+    depends_on:
+      - psql_aiohttp
+
+  psql_aiohttp:
+    image: postgres:11-alpine
+    expose:
+      - 5432
+    volumes:
+      - "psql_aiohttp_data:/var/lib/postgresql/data"
+    environment:
+      POSTGRES_USER: "root"
+      POSTGRES_PASSWORD: "root"
+      POSTGRES_DB: "demo"
+    ports:
+      - "5432:5432"
+
+volumes:
+  psql_aiohttp_data: { }
