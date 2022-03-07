@@ -135,7 +135,7 @@ class GameAccessor(BaseAccessor):
         query = GameModel.outerjoin(ScoreModel).outerjoin(UserModel).select()
         res_query = await query.where(GameModel.status == status).where(
             GameModel.winner_user_id == ScoreModel.user_id).where(
-            GameModel.winner_user_id == UserModel.id).limit(limit).offset(offset).gino.load(
+            GameModel.winner_user_id == UserModel.id).order_by(GameModel.id).limit(limit).offset(offset).gino.load(
             GameModel.distinct(GameModel.id).load(
                 add_user=UserModel.distinct(UserModel.id)).load(
                 add_score=ScoreModel.distinct(ScoreModel.id))).all()
@@ -257,9 +257,10 @@ class GameAccessor(BaseAccessor):
         count = db.func.count(UserModel.id)
         query = db.select([UserModel.vk_id, UserModel.first_name, UserModel.last_name, count]).select_from(
             GameModel.outerjoin(UserModel, GameModel.winner_user_id == UserModel.id))
-        res = await query.where(GameModel.winner_user_id != None).group_by(
-            UserModel.vk_id, UserModel.first_name, UserModel.last_name).limit(limit).offset(offset).gino.all()
-        return[Winner(vk_id=el.vk_id, win_count=el[3],first_name=el.first_name, last_name=el.last_name) for el in res]
+        res = await query.where(GameModel.winner_user_id != None).order_by(UserModel.vk_id).group_by(
+            UserModel.vk_id, UserModel.first_name, UserModel.last_name)\
+            .limit(limit).offset(offset).gino.all()
+        return[Winner(vk_id=el.vk_id, win_count=el[3], first_name=el.first_name, last_name=el.last_name) for el in res]
 
     async def duration_total(self) -> datetime.timedelta:
         select = db.func.sum(GameModel.finished_at - GameModel.started_at)

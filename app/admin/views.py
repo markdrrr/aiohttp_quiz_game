@@ -9,6 +9,7 @@ from aiohttp.web import HTTPForbidden, HTTPUnauthorized
 
 from app.web.utils import json_response
 
+LIMIT = 5
 
 class AdminLoginView(View):
     @request_schema(AdminSchema)
@@ -38,15 +39,14 @@ class FetchGamesView(View):
     @response_schema(ListGameSchema)
     async def get(self):
         page = self.data.get("page", 0)
-        limit = 5
-        offset = 5 * page
-        games_db = await self.store.game.list_games(status=StatusGame.FINISHED, limit=limit, offset=offset)
+        offset = LIMIT * page
+        games_db = await self.store.game.list_games(status=StatusGame.FINISHED, limit=LIMIT, offset=offset)
         games = []
         for game in games_db:
             winners = sorted(game.users, key=lambda x: x.points, reverse=True) if game.users else None
             winner = {
-                    "vk_id": winners[0].vk_id,
-                    "points": winners[0].points,
+                    "vk_id": winners[0].vk_id if winners else None,
+                    "points": winners[0].points if winners else None,
                 }
             games.append({
                 "id": game.id,
@@ -72,9 +72,8 @@ class FetchGameStatsView(View):
     @response_schema(ListGameStatsSchema)
     async def get(self):
         page = self.data.get("page", 0)
-        limit = 5
-        offset = 5 * page
-        winners = await self.store.game.list_winners(limit=limit, offset=offset)
+        offset = LIMIT * page
+        winners = await self.store.game.list_winners(limit=LIMIT, offset=offset)
         winners_top = [el.to_dict() for el in winners]
         total = await self.store.game.count_games(status=StatusGame.FINISHED)
         duration_total = await self.store.game.duration_total()
