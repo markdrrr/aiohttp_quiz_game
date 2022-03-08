@@ -17,7 +17,7 @@ class BotManager:
     async def handle_updates(self, updates: list[Update]) -> bool:
         if updates:
             for update in updates:
-                chat_id = str(update.object.peer_id)
+                chat_id = update.object.peer_id
                 sent_answer = False
                 active_game = await self.app.store.game.get_game_by_chat_id(chat_id=chat_id)
                 if active_game is None:

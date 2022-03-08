@@ -1,3 +1,4 @@
+import datetime
 from typing import List
 from typing import Optional
 
@@ -8,7 +9,7 @@ from app.quiz.models import (
     Answer,
     ThemeModel,
     QuestionModel,
-    AnswerModel, User, UserModel, GameModel, StatusGame, Game, Score, ScoreModel, UserScore,
+    AnswerModel, User, UserModel, GameModel, StatusGame, Game, Score, ScoreModel, UserScore, Winner,
 )
 from app.store.database.gino import db
 
@@ -112,9 +113,9 @@ class GameAccessor(BaseAccessor):
                         users=[User(
                             id=el.id,
                             vk_id=el.vk_id,
-                            name=el.name,
-                            is_admin=el.is_admin,
-                            count_score=scores.get(el.id, 0),
+                            first_name=el.first_name,
+                            last_name=el.last_name,
+                            points=scores.get(el.id, 0),
                         ) for el in res.users],
                         questions=[
                             Question(
@@ -124,7 +125,52 @@ class GameAccessor(BaseAccessor):
                                 answers=[Answer(title=el.title, is_correct=el.is_correct) for el in el.answers])
                             for el in questions],
                         current_question_id=res.current_question_id,
-                        finish_question_ids=res.question_ids if res.question_ids else [])
+                        finish_question_ids=res.question_ids if res.question_ids else [],
+                        started_at=res.started_at,
+                        finished_at=res.finished_at,
+            )
+
+    async def list_games(self, status: str = StatusGame.STARTED, limit: int = None, offset: int = None) -> List[Game]:
+        """ Получаем список игр """
+        query = GameModel.outerjoin(ScoreModel).outerjoin(UserModel).select()
+        res_query = await query.where(GameModel.status == status).where(
+            GameModel.winner_user_id == ScoreModel.user_id).where(
+            GameModel.winner_user_id == UserModel.id).order_by(GameModel.id).limit(limit).offset(offset).gino.load(
+            GameModel.distinct(GameModel.id).load(
+                add_user=UserModel.distinct(UserModel.id)).load(
+                add_score=ScoreModel.distinct(ScoreModel.id))).all()
+        games = []
+        for res in res_query:
+            questions = await self.app.store.quizzes.list_questions()
+            scores = {el.user_id: el.count for el in res.scores}
+            if res:
+                games.append(
+                    Game(
+                        id=res.id,
+                        chat_id=res.chat_id,
+                        status=res.status,
+                        users=[User(
+                            id=el.id,
+                            vk_id=el.vk_id,
+                            first_name=el.first_name,
+                            last_name=el.last_name,
+                            points=scores.get(el.id, 0),
+                        ) for el in res.users],
+                        questions=[
+                            Question(
+                                id=el.id,
+                                title=el.title,
+                                theme_id=el.theme_id,
+                                answers=[Answer(title=el.title, is_correct=el.is_correct) for el in
+                                         el.answers])
+                            for el in questions],
+                        current_question_id=res.current_question_id,
+                        finish_question_ids=res.question_ids if res.question_ids else [],
+                        started_at=res.started_at,
+                        finished_at=res.finished_at,
+                    )
+                )
+        return games
 
     async def create_game(self, chat_id: str, users: list) -> Game:
         """ Создаем игру """
@@ -138,15 +184,22 @@ class GameAccessor(BaseAccessor):
             finish_question_ids=[],
             current_question_id=res_game.current_question_id,
             questions=await self.app.store.quizzes.list_questions(),
+            started_at=res_game.started_at,
+            finished_at=res_game.finished_at,
         )
 
     async def set_current_question_for_game(self, question_id: int, game_id: int) -> None:
         """ Обновляем текущий вопрос для игры """
         await GameModel.update.values(current_question_id=question_id).where(GameModel.id == game_id).gino.status()
 
-    async def set_status_for_game(self, status: int, game_id: int) -> None:
+    async def set_status_for_game(self, status: int, game_id: int, winner_user_id: int = None) -> None:
         """ Обновляем статус игры """
-        await GameModel.update.values(status=status).where(GameModel.id == game_id).gino.status()
+        if status == StatusGame.FINISHED:
+            await GameModel.update.values(status=status,
+                                          finished_at=datetime.datetime.utcnow(),
+                                          winner_user_id=winner_user_id).where(GameModel.id == game_id).gino.status()
+        else:
+            await GameModel.update.values(status=status).where(GameModel.id == game_id).gino.status()
 
     async def add_finished_question_ids_for_game(self,
                                                  current_question_ids: list,
@@ -156,12 +209,12 @@ class GameAccessor(BaseAccessor):
         current_question_ids.append(new_finished_question_id)
         await GameModel.update.values(question_ids=current_question_ids).where(GameModel.id == game_id).gino.status()
 
-    async def update_score(self, user_id: int, game_id: int, count: int) -> Score:
+    async def update_score(self, user_id: int, game_id: int, count: int):
         """ Записываем игроку очки за верный ответ """
         await ScoreModel.update.values(count=count). \
             where(ScoreModel.user_id == user_id).where(ScoreModel.game_id == game_id).gino.status()
 
-    async def create_level_game(self, game: Game, user: User) -> Score:
+    async def create_level_game(self, game: Game, user: User):
         """
             Записываем импровизированный уровень игры
             в объект game добавляем пройденные вопросы
@@ -171,7 +224,7 @@ class GameAccessor(BaseAccessor):
             game_id=game.id,
             current_question_ids=game.finish_question_ids,
             new_finished_question_id=game.current_question_id)
-        return await self.update_score(user_id=user.id, game_id=game.id, count=user.count_score)
+        await self.update_score(user_id=user.id, game_id=game.id, count=user.points)
 
     async def get_count_score_by_game_and_user_id(self, game_id: int, user_id: int) -> Optional[int]:
         """ Получаем общее количество очков юзера (user_id) из игры (game_id)"""
@@ -187,6 +240,43 @@ class GameAccessor(BaseAccessor):
             UserModel.distinct(UserModel.id).load(add_score=ScoreModel.distinct(ScoreModel.id))).all()
         return [UserScore(
             user_id=el.id,
-            name=el.name,
-            score_count=sum([x.count for x in el.scores])
+            first_name=el.first_name,
+            last_name=el.last_name,
+            points=sum([x.count for x in el.scores])
         ) for el in query_res]
+
+    async def count_games(self, status: str = None) -> int:
+        """ Получаем кол-во игр """
+        select = db.func.count(GameModel.id)
+        if status:
+            return await db.select([select]).where(GameModel.status == status).gino.scalar()
+        else:
+            return await db.select([select]).gino.scalar()
+
+    async def list_winners(self, limit: int = None, offset: int = None) -> List[Winner]:
+        count = db.func.count(UserModel.id)
+        query = db.select([UserModel.vk_id, UserModel.first_name, UserModel.last_name, count]).select_from(
+            GameModel.outerjoin(UserModel, GameModel.winner_user_id == UserModel.id))
+        res = await query.where(GameModel.winner_user_id != None).order_by(UserModel.vk_id).group_by(
+            UserModel.vk_id, UserModel.first_name, UserModel.last_name)\
+            .limit(limit).offset(offset).gino.all()
+        return[Winner(vk_id=el.vk_id, win_count=el[3], first_name=el.first_name, last_name=el.last_name) for el in res]
+
+    async def duration_total(self) -> datetime.timedelta:
+        select = db.func.sum(GameModel.finished_at - GameModel.started_at)
+        return await db.select([select]).where(GameModel.status == StatusGame.FINISHED).gino.scalar()
+
+    async def duration_average(self) -> datetime.timedelta:
+        select = db.func.avg(GameModel.finished_at - GameModel.started_at)
+        return await db.select([select]).where(GameModel.status == StatusGame.FINISHED).gino.scalar()
+
+    async def games_average_per_day(self) -> int:
+        count_in_day = db.func.count(GameModel.id).label('count_in_day')
+        select = db.select([GameModel.started_at, count_in_day]).select_from(
+            GameModel).where(GameModel.status == StatusGame.FINISHED).group_by(
+            GameModel.started_at)
+        # select = db.func.avg(db.select([result_elem.count_in_day]).select_from(result_elem))
+        res = await select.gino.all()
+        if not res:
+            return 0
+        return sum([el.count_in_day for el in res]) / len(res)
