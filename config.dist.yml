@@ -1,0 +1,16 @@
+session:
+  key: #####
+admin:
+  email: admin@admin.com
+  password: admin
+database:
+  host: psql_aiohttp
+  port: 5432
+  user: root
+  password: root
+  database: demo
+bot:
+  token: #####
+  group_id: #####
+
+
