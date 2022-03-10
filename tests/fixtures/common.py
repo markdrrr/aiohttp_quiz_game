@@ -48,7 +48,7 @@ async def clear_db(server):
     yield
     db = server.database.db
     for table in db.sorted_tables:
-        await db.status(db.text(f"TRUNCATE {table.name} CASCADE"))
+        await db.status(db.text(f'TRUNCATE "{table.name}" CASCADE'))
         try:
             row = await db.status(
                 db.text(f"ALTER SEQUENCE {table.name}_id_seq RESTART WITH 1")
