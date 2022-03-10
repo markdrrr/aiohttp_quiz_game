@@ -141,7 +141,7 @@ class VkApiAccessor(BaseAccessor):
             users.append(user)
         return users
 
-    async def poll(self):
+    async def poll(self) -> List[Update]:
         async with self.session.get(
                 self._build_query(
                     host=self.server,
@@ -184,7 +184,7 @@ class VkApiAccessor(BaseAccessor):
                         ),
                     )
                 )
-            await self.app.store.bots_manager.handle_updates(updates)
+            return updates
 
     async def send_message(self, message: Message, keyboard: str = None) -> None:
         params = {
