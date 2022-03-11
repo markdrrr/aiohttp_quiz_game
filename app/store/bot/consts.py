@@ -1,5 +1,6 @@
 class BotMessage:
     WRONG_ANSWER = 'Неверный ответ %0A'
+    CORRECT_ANSWER = 'Правильный ответ! %0A'
     IS_NOT_ADMIN = 'Назначьте бота администратором %0A'
     HAVE_NOT_QUESTIONS = 'В боте отсутствуют вопросы %0A'
     ALREADY_STARTED = 'Игра уже началась %0A'

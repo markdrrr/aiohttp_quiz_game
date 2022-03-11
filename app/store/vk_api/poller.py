@@ -6,6 +6,7 @@ from app.store import Store
 
 QUEUES = {}
 
+
 class Poller:
     def __init__(self, store: Store):
         self.store = store
