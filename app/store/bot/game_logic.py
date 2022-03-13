@@ -60,15 +60,16 @@ class GameLogic:
         game.finish_question_ids.append(game.current_question_id)
         return game
 
-    async def check_time_question(self, question_id: int, chat_id: int) -> bool:
+    async def check_time_question(self, update: Update, question_id: int, chat_id: int) -> bool:
         await asyncio.sleep(self.TIME_FOR_QUESTION)
         active_game = await self.app.store.game.get_game_by_chat_id(chat_id=chat_id)
         if active_game:
             current_question = active_game.get_current_question()
             # если до сих пор текущий вопрос тот же, переходим к следующему вопросу
-            if question_id == current_question.id:
+            if current_question is not None and question_id == current_question.id:
                 game = await self.update_game_without_answer(game=active_game)
-                text_message = await self.next_question(game=game, answered=False)
+                text_message = await self.next_question(update=update, game=game, answered=False)
+                text_message = f'Правильный ответ был - {current_question.get_correct_answer().title} %0A' + text_message
                 await self.app.store.vk_api.send_message(
                     Message(
                         peer_id=chat_id,
@@ -103,7 +104,13 @@ class GameLogic:
 
             text_message = BotMessage.START_GAME_TEXT.format(question_title=current_question.title)
             # запускаем в фоне проверку если выйдет время на ответ
-            asyncio.create_task(self.check_time_question(question_id=current_question.id, chat_id=chat_id))
+            asyncio.create_task(
+                self.check_time_question(
+                    update=update,
+                    question_id=current_question.id,
+                    chat_id=chat_id
+                )
+            )
 
         await self.app.store.vk_api.send_message(
             Message(
@@ -119,8 +126,8 @@ class GameLogic:
         if game is not None and game.status == StatusGame.STARTED:
             text_message = BotMessage.RESULT_GAME.format(game_id=game.id)
             user_scores = await self.app.store.game.get_user_score_by_game(game_id=game.id)
-            text_score = '%0A'.join([f'Игрок {el.first_name}: {el.points} очков' for el in user_scores])
-            text_message += text_score
+            for i, user in enumerate(user_scores):
+                text_message += f'%{i}. Игрок {user.first_name}: {user.points} очков %0A'
         await self.app.store.vk_api.send_message(
             Message(
                 peer_id=update.object.peer_id,
@@ -130,7 +137,7 @@ class GameLogic:
         )
         return True
 
-    async def next_question(self, game: Game, answered: bool = True, user: User = None) -> str:
+    async def next_question(self, update: Update, game: Game, answered: bool = True, user: User = None) -> str:
         current_question = game.get_question_for_chat()
         if current_question:
             # если еще остались вопросы берем следующий
@@ -139,13 +146,20 @@ class GameLogic:
                 game_id=game.id
             )
             if answered and user:
-                text_message = f"Правильный ответ! %0A {user.first_name} зачисленно {self.WIN_SCORE} баллов. %0A" \
+                text_message = f"{update.object.body} - {BotMessage.CORRECT_ANSWER}" \
+                               f" {user.first_name} зачислено {self.WIN_SCORE} баллов. %0A" \
                                f"Следующий вопрос '{current_question.title}' %0A"
             else:
                 text_message = BotMessage.NO_ANSWER_FOR_TIME + f"Следующий вопрос '{current_question.title}' %0A"
 
             # запускаем в фоне проверку на время для следующего вопроса
-            asyncio.create_task(self.check_time_question(question_id=current_question.id, chat_id=game.chat_id))
+            asyncio.create_task(
+                self.check_time_question(
+                    update=update,
+                    question_id=current_question.id,
+                    chat_id=game.chat_id
+                )
+            )
         else:
             # вопросов не осталось завершаем игру
             if answered and user:
@@ -155,8 +169,8 @@ class GameLogic:
             text_message += f"Игра завершена, вопросов не осталось %0A" \
                             f"Результаты: %0A"
             user_scores = await self.app.store.game.get_user_score_by_game(game_id=game.id)
-            text_score = '%0A'.join([f'{el.first_name}: {el.points} очков' for el in user_scores])
-            text_message += text_score
+            for i, user in enumerate(user_scores, start=1):
+                text_message += f'{i}. Игрок {user.first_name}: {user.points} очков %0A'
             user_winner = game.get_winner()
             await self.app.store.game.set_status_for_game(
                 status=StatusGame.FINISHED,
@@ -175,9 +189,9 @@ class GameLogic:
             # Если ответ верный обновляем игру и записываем очки юзеру
             user.points += self.WIN_SCORE
             await self.app.store.game.create_level_game(game=game, user=user)
-            text_message = await self.next_question(game=game, user=user, answered=True)
+            text_message = await self.next_question(update=update, game=game, user=user, answered=True)
         else:
-            text_message = BotMessage.WRONG_ANSWER
+            text_message = f'{update.object.body} - {BotMessage.WRONG_ANSWER}'
 
         await self.app.store.vk_api.send_message(
             Message(
