@@ -40,7 +40,7 @@ class FetchGamesView(View):
     async def get(self):
         page = self.data.get("page", 0)
         offset = LIMIT * page
-        games_db = await self.store.game.list_games(status=StatusGame.FINISHED, limit=LIMIT, offset=offset)
+        games_db = await self.store.game.list_finish_games(status=StatusGame.FINISHED, limit=LIMIT, offset=offset)
         games = []
         for game in games_db:
             winners = sorted(game.users, key=lambda x: x.points, reverse=True) if game.users else None
@@ -52,7 +52,7 @@ class FetchGamesView(View):
                 "id": game.id,
                 "chat_id": game.chat_id,
                 "started_at": game.started_at,
-                "duration": (game.finished_at - game.started_at).seconds,
+                "duration": (game.finished_at - game.started_at).total_seconds(),
                 "winner": winner,
                 "finished_at": game.finished_at,
             })
@@ -77,15 +77,17 @@ class FetchGameStatsView(View):
         winners_top = [el.to_dict() for el in winners]
         total = await self.store.game.count_games(status=StatusGame.FINISHED)
         duration_total = await self.store.game.duration_total()
+        print('duration_total', duration_total)
         duration_average = await self.store.game.duration_average()
+        print('duration_average', duration_average)
         games_average_per_day = await self.store.game.games_average_per_day()
         return json_response(
             data=ListGameStatsSchema().dump(
                 {
                     "winners_top": winners_top,
                     "games_total": total,
-                    "duration_total": duration_total.total_seconds(),
-                    "duration_average": duration_average.total_seconds(),
+                    "duration_total": duration_total.total_seconds() if duration_total else None,
+                    "duration_average": duration_average.total_seconds() if duration_average else None,
                     "games_average_per_day": games_average_per_day,
                 }
             )

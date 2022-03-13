@@ -14,11 +14,11 @@ class WinnerSchema(Schema):
 
 class GameSchema(Schema):
     id = fields.Int()
-    chat_id = fields.Str()
-    started_at = fields.Date()
+    chat_id = fields.Int()
+    started_at = fields.DateTime()
     duration = fields.Int()
     winner = fields.Nested("WinnerSchema", required=True)
-    finished_at = fields.Date()
+    finished_at = fields.DateTime()
 
 
 class ListGameSchema(Schema):

@@ -17,9 +17,13 @@ if typing.TYPE_CHECKING:
 API_PATH = "https://api.vk.com/method/"
 
 
+class BotIsNotAdminError(Exception):
+    """Вызывается, когда нет админских прав у бота в беседе"""
+    pass
+
+
 class Keyboard:
     navigate = {
-        # "one_time": False,
         "inline": True,
         "buttons": [
             [
@@ -114,7 +118,10 @@ class VkApiAccessor(BaseAccessor):
                     },
                 )
         ) as resp:
-            data = (await resp.json())["response"]
+            data = await resp.json()
+            if 'error' in data and data.get('error', {}).get('error_code') == 917:
+                raise BotIsNotAdminError
+            data = data["response"]
             return data.get("profiles", [])
 
     async def get_users_from_chat(self, peer_id: int) -> List[User]:
@@ -122,7 +129,7 @@ class VkApiAccessor(BaseAccessor):
         users = []
         try:
             profiles = await self._get_users_chat(peer_id=peer_id)
-        except Exception as e:
+        except KeyError as e:
             profiles = []
             self.logger.error("Exception", exc_info=e)
         for profile in profiles:
@@ -153,8 +160,13 @@ class VkApiAccessor(BaseAccessor):
             raw_updates = data.get("updates", [])
             updates = []
             for update in raw_updates:
+                action = None
                 type_chat = 'public' if update["object"]["message"]["peer_id"] > 2000000000 else 'privat'
-                action = update.get("object", {}).get("message", {}).get("action", {}).get("type")
+                action_type = update.get("object", {}).get("message", {}).get("action", {}).get("type")
+                member_id = update.get("object", {}).get("message", {}).get("action", {}).get("member_id")
+                if action_type == UpdateStatus.INVITE_CHAT and abs(member_id) == self.app.config.bot.group_id:
+                    # бота пригласили в чат
+                    action = UpdateStatus.INVITE_CHAT
                 if action is None:
                     payload = update.get("object", {}).get("message", {}).get("payload")
                     action = json.loads(payload).get('button') if payload is not None else None
@@ -176,14 +188,10 @@ class VkApiAccessor(BaseAccessor):
 
     async def send_message(self, message: Message, keyboard: str = None) -> None:
         params = {
-            # "user_id": message.user_id,
             "random_id": random.randint(1, 2 ** 32),
-            # "peer_id": "-" + str(self.app.config.bot.group_id),
             "peer_id": message.peer_id,
             "message": message.text,
             "access_token": self.app.config.bot.token,
-            # "one_time": 'false',
-            # "keyboard": json.dumps(keyboard),
         }
         if keyboard:
             params["keyboard"] = json.dumps(keyboard)

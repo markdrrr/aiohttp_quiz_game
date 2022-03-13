@@ -2,7 +2,7 @@ import asyncio
 
 from app.quiz.models import StatusGame, Game, User
 from app.store.bot.consts import BotMessage
-from app.store.vk_api.accessor import Keyboard
+from app.store.vk_api.accessor import Keyboard, BotIsNotAdminError
 from app.store.vk_api.dataclasses import Message, Update
 
 
@@ -42,7 +42,7 @@ class GameLogic:
         return True
 
     async def action_finish_game(self, update: Update, game: Game) -> bool:
-        await self.app.store.game.set_status_for_game(game_id=game.id, status=StatusGame.FINISHED)
+        await self.app.store.game.set_status_for_game(game=game, status=StatusGame.FINISHED)
         await self.app.store.vk_api.send_message(
             Message(
                 peer_id=update.object.peer_id,
@@ -62,36 +62,56 @@ class GameLogic:
 
     async def check_time_question(self, question_id: int, chat_id: int) -> bool:
         await asyncio.sleep(self.TIME_FOR_QUESTION)
-        game = await self.app.store.game.get_game_by_chat_id(chat_id=chat_id)
-        current_question = game.get_current_question()
-        # если до сих пор текущий вопрос тот же, переходим к следующему вопросу
-        if question_id == current_question.id:
-            game = await self.update_game_without_answer(game=game)
-            text_message = await self.next_question(game=game, answered=False)
-            await self.app.store.vk_api.send_message(
-                Message(
-                    peer_id=chat_id,
-                    text=text_message,
-                ),
-                keyboard=Keyboard.navigate
-            )
+        active_game = await self.app.store.game.get_game_by_chat_id(chat_id=chat_id)
+        if active_game:
+            current_question = active_game.get_current_question()
+            # если до сих пор текущий вопрос тот же, переходим к следующему вопросу
+            if question_id == current_question.id:
+                game = await self.update_game_without_answer(game=active_game)
+                text_message = await self.next_question(game=game, answered=False)
+                await self.app.store.vk_api.send_message(
+                    Message(
+                        peer_id=chat_id,
+                        text=text_message,
+                    ),
+                    keyboard=Keyboard.navigate
+                )
         return True
 
     async def action_start_game(self, update: Update, chat_id: int) -> bool:
-        users = await self.app.store.vk_api.get_users_from_chat(peer_id=update.object.peer_id)
-        game = await self.app.store.game.create_game(chat_id=chat_id, users=users)
-        current_question = game.get_question_for_chat()
-        await self.app.store.game.set_current_question_for_game(question_id=current_question.id,
-                                                                game_id=game.id)
+        text_message = ''
+        bot_is_admin = True
+        exist_questions = True
+        users = []
+        try:
+            users = await self.app.store.vk_api.get_users_from_chat(peer_id=update.object.peer_id)
+        except BotIsNotAdminError:
+            # проверка что бы бот был назначен админом
+            bot_is_admin = False
+            text_message = BotMessage.IS_NOT_ADMIN
+
+        list_questions = await self.app.store.quizzes.list_questions()
+        if len(list_questions) == 0:
+            exist_questions = False
+            text_message = BotMessage.HAVE_NOT_QUESTIONS
+
+        if bot_is_admin and exist_questions:
+            game = await self.app.store.game.create_game(chat_id=chat_id, users=users)
+            current_question = game.get_question_for_chat()
+            await self.app.store.game.set_current_question_for_game(question_id=current_question.id,
+                                                                    game_id=game.id)
+
+            text_message = BotMessage.START_GAME_TEXT.format(question_title=current_question.title)
+            # запускаем в фоне проверку если выйдет время на ответ
+            asyncio.create_task(self.check_time_question(question_id=current_question.id, chat_id=chat_id))
+
         await self.app.store.vk_api.send_message(
             Message(
                 peer_id=update.object.peer_id,
-                text=BotMessage.START_GAME_TEXT.format(question_title=current_question.title),
+                text=text_message,
             ),
             keyboard=Keyboard.navigate
         )
-        # запускаем в фоне проверку если выйдет время на ответ
-        asyncio.create_task(self.check_time_question(question_id=current_question.id, chat_id=chat_id))
         return True
 
     async def action_result_game(self, update: Update, game: Game) -> bool:
@@ -99,7 +119,7 @@ class GameLogic:
         if game is not None and game.status == StatusGame.STARTED:
             text_message = BotMessage.RESULT_GAME.format(game_id=game.id)
             user_scores = await self.app.store.game.get_user_score_by_game(game_id=game.id)
-            text_score = '\n'.join([f'Игрок {el.first_name}: {el.points} очков' for el in user_scores])
+            text_score = '%0A'.join([f'Игрок {el.first_name}: {el.points} очков' for el in user_scores])
             text_message += text_score
         await self.app.store.vk_api.send_message(
             Message(
@@ -119,28 +139,28 @@ class GameLogic:
                 game_id=game.id
             )
             if answered and user:
-                text_message = f"Правильный ответ! {user.first_name} зачисленно {self.WIN_SCORE} баллов. " \
-                               f"Следующий вопрос '{current_question.title}'"
+                text_message = f"Правильный ответ! %0A {user.first_name} зачисленно {self.WIN_SCORE} баллов. %0A" \
+                               f"Следующий вопрос '{current_question.title}' %0A"
             else:
-                text_message = BotMessage.NO_ANSWER_FOR_TIME + f"Следующий вопрос '{current_question.title}'"
+                text_message = BotMessage.NO_ANSWER_FOR_TIME + f"Следующий вопрос '{current_question.title}' %0A"
 
             # запускаем в фоне проверку на время для следующего вопроса
             asyncio.create_task(self.check_time_question(question_id=current_question.id, chat_id=game.chat_id))
         else:
             # вопросов не осталось завершаем игру
             if answered and user:
-                text_message = f"Правильный ответ! {user.first_name} зачисленно {self.WIN_SCORE} баллов."
+                text_message = f"Правильный ответ! %0A {user.first_name} зачислено {self.WIN_SCORE} баллов. %0A"
             else:
                 text_message = BotMessage.NO_ANSWER_FOR_TIME
-            text_message += f"Игра завершена, вопросов не осталось " \
-                            f"Результаты"
+            text_message += f"Игра завершена, вопросов не осталось %0A" \
+                            f"Результаты: %0A"
             user_scores = await self.app.store.game.get_user_score_by_game(game_id=game.id)
-            text_score = '\n'.join([f'Игрок {el.first_name}: {el.points} очков' for el in user_scores])
+            text_score = '%0A'.join([f'{el.first_name}: {el.points} очков' for el in user_scores])
             text_message += text_score
             user_winner = game.get_winner()
             await self.app.store.game.set_status_for_game(
                 status=StatusGame.FINISHED,
-                game_id=game.id,
+                game=game,
                 winner_user_id=user_winner.id,
             )
         return text_message

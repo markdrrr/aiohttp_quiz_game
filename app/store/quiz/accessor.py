@@ -116,7 +116,7 @@ class GameAccessor(BaseAccessor):
                             first_name=el.first_name,
                             last_name=el.last_name,
                             points=scores.get(el.id, 0),
-                        ) for el in res.users],
+                        ) for el in sorted(res.users, key=lambda x: x.id)],
                         questions=[
                             Question(
                                 id=el.id,
@@ -130,7 +130,7 @@ class GameAccessor(BaseAccessor):
                         finished_at=res.finished_at,
             )
 
-    async def list_games(self, status: str = StatusGame.STARTED, limit: int = None, offset: int = None) -> List[Game]:
+    async def list_finish_games(self, status: str = StatusGame.FINISHED, limit: int = None, offset: int = None) -> List[Game]:
         """ Получаем список игр """
         query = GameModel.outerjoin(ScoreModel).outerjoin(UserModel).select()
         res_query = await query.where(GameModel.status == status).where(
@@ -175,7 +175,8 @@ class GameAccessor(BaseAccessor):
     async def create_game(self, chat_id: str, users: list) -> Game:
         """ Создаем игру """
         res_game = await GameModel.create(chat_id=chat_id, status=StatusGame.STARTED)
-        await ScoreModel.insert().gino.all([dict(game_id=res_game.id, user_id=user.id, count=0) for user in users])
+        if users:
+            await ScoreModel.insert().gino.all([dict(game_id=res_game.id, user_id=user.id, count=0) for user in users])
         return Game(
             id=res_game.id,
             chat_id=res_game.chat_id,
@@ -192,14 +193,18 @@ class GameAccessor(BaseAccessor):
         """ Обновляем текущий вопрос для игры """
         await GameModel.update.values(current_question_id=question_id).where(GameModel.id == game_id).gino.status()
 
-    async def set_status_for_game(self, status: int, game_id: int, winner_user_id: int = None) -> None:
+    async def set_status_for_game(self, status: int, game: Game, winner_user_id: int = None) -> Game:
         """ Обновляем статус игры """
         if status == StatusGame.FINISHED:
+            finished_at = datetime.datetime.utcnow()
+            game.finished_at = finished_at
             await GameModel.update.values(status=status,
-                                          finished_at=datetime.datetime.utcnow(),
-                                          winner_user_id=winner_user_id).where(GameModel.id == game_id).gino.status()
+                                          finished_at=finished_at,
+                                          winner_user_id=winner_user_id).where(GameModel.id == game.id).gino.status()
         else:
-            await GameModel.update.values(status=status).where(GameModel.id == game_id).gino.status()
+            await GameModel.update.values(status=status).where(GameModel.id == game.id).gino.status()
+        game.status = status
+        return game
 
     async def add_finished_question_ids_for_game(self,
                                                  current_question_ids: list,
