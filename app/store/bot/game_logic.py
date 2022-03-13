@@ -126,8 +126,9 @@ class GameLogic:
         if game is not None and game.status == StatusGame.STARTED:
             text_message = BotMessage.RESULT_GAME.format(game_id=game.id)
             user_scores = await self.app.store.game.get_user_score_by_game(game_id=game.id)
-            for i, user in enumerate(user_scores):
-                text_message += f'%{i}. Игрок {user.first_name}: {user.points} очков %0A'
+            user_scores = sorted(user_scores, key=lambda x: x.points, reverse=True)
+            for i, user in enumerate(user_scores, start=1):
+                text_message += f'{i}. Игрок {user.first_name}: {user.points} очков %0A'
         await self.app.store.vk_api.send_message(
             Message(
                 peer_id=update.object.peer_id,
@@ -169,6 +170,7 @@ class GameLogic:
             text_message += f"Игра завершена, вопросов не осталось %0A" \
                             f"Результаты: %0A"
             user_scores = await self.app.store.game.get_user_score_by_game(game_id=game.id)
+            user_scores = sorted(user_scores, key=lambda x: x.points, reverse=True)
             for i, user in enumerate(user_scores, start=1):
                 text_message += f'{i}. Игрок {user.first_name}: {user.points} очков %0A'
             user_winner = game.get_winner()
